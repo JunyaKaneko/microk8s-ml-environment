@@ -1,0 +1,113 @@
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  namespace: default
+  name: dask-kubernetes-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - "pods"
+  verbs:
+  - "get"
+  - "list"
+  - "watch"
+  - "create"
+  - "delete"
+- apiGroups:
+  - ""
+  resources:
+  - "pods/log"
+  verbs:
+  - "get"
+  - "list"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dask-kubernetes-role-binding
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: default
+  apiGroup: ""
+roleRef:
+  kind: Role
+  name: dask-kubernetes-role
+  apiGroup: ""
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jupyter-pvc
+  labels:
+    app: jupyter
+spec:
+  storageClassName: microk8s-hostpath
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jupyter-deployment
+  labels:
+    app: jupyter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jupyter
+  template:
+    metadata:
+      labels:
+        app: jupyter
+    spec:
+      containers:
+        - name: jupyter
+          image: localhost:32000/tensorflow:0.0.0.26
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "16Gi"
+          ports:
+            - containerPort: 8888
+            - containerPort: 8787
+            - containerPort: 8786
+          volumeMounts:
+            - mountPath: "/code"
+              name: jupyter-data
+        - name: tensorboard
+          image: localhost:32000/tensorflow:0.0.0.26
+          command: ["/usr/local/bin/entrypoint.sh"]
+          args: ["tensorboard", "--logdir", "logs", "--host", "0.0.0.0"]
+          ports:
+            - containerPort: 6006
+          volumeMounts:
+            - mountPath: "/code"
+              name: jupyter-data
+      volumes:
+        - name: jupyter-data
+          persistentVolumeClaim:
+            claimName: jupyter-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jupyter
+spec:
+  type: NodePort
+  selector:
+    app: jupyter
+  ports:
+    - port: 8888
+      targetPort: 8888
+      name: jupyter
+    - port: 8787
+      targetPort: 8787
+      name: dask-dashboard
+    - port: 6006
+      name: tensorboard
